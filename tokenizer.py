@@ -28,7 +28,7 @@ def train_tokenizer(path_to_data_root):
     ### Train Tokenizer ###
     trainer = WordPieceTrainer(vocab_size=32000, special_tokens=list(special_token_dict.values()))
     tokenizer.train(french_files, trainer)
-    tokenizer.save("/teamspace/studios/this_studio/french_wp.json")
+    tokenizer.save(os.getcwd() + "/french_wp.json")
 
 class FrenchTokenizer:
 
@@ -90,21 +90,22 @@ class FrenchTokenizer:
         return decoded
         
 if __name__ == "__main__":
-    # parser = argparse.ArgumentParser(description="Tokenizer Prep")
+    parser = argparse.ArgumentParser(description="Tokenizer Prep")
 
-    # parser.add_argument(
-    #     "--path_to_data_root", 
-    #     required=True, 
-    #     help="Path to where you want to save the final tokenized dataset",
-    #     type=str
-    # )
+    parser.add_argument(
+        "--path_to_data_root", 
+        required=False,
+        default = os.getcwd(),
+        help="Path to where you want to save the final tokenized dataset",
+        type=str
+    )
 
-    # args = parser.parse_args()
+    args = parser.parse_args()
 
-    # path_to_data_root = "/mnt/datadrive/data/machine_translation/english2french/"
-    # train_tokenizer(args.path_to_data_root)
+    path_to_data_root = ""
+    train_tokenizer(args.path_to_data_root)
 
-    tokenizer = FrenchTokenizer("/teamspace/studios/this_studio/french_wp.json")
+    tokenizer = FrenchTokenizer(args.path_to_data_root + "/french_wp.json")
     sentence = "Héllo world!"
     enc = tokenizer.encode(sentence)
     print(enc)

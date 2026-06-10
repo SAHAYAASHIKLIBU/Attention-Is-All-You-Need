@@ -35,7 +35,7 @@ def tokenize_english2french_dataset(path_to_hf_data,
                                     max_length=512, 
                                     min_length=5):
 
-    french_tokenizer = FrenchTokenizer("trained_tokenizer/french_wp.json", truncate=truncate, max_length=max_length)
+    french_tokenizer = FrenchTokenizer(os.getcwd() + "/french_wp.json", truncate=truncate, max_length=max_length)
     english_tokenzer = AutoTokenizer.from_pretrained("google-bert/bert-base-uncased")
 
     raw_dataset = load_from_disk(path_to_hf_data)
@@ -90,7 +90,8 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "--path_to_data_root", 
-        required=True, 
+        required=False,
+        default = os.getcwd(), 
         help="Path to where you want to save the final tokenized dataset",
         type=str
     )

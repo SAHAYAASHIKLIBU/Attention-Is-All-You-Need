@@ -11,8 +11,8 @@ def data_process(path = os.getcwd(), remove = False, giga = False, check = True)
         if "annotation" not in i:
             os.rename(i, path+"/data/"+os.path.basename(i))
     if giga:
-        os.rename("/teamspace/studios/this_studio/train/giga-fren.release2.fixed.en", "/teamspace/studios/this_studio/data/giga-fren.release2.fr-en.en")
-        os.rename("/teamspace/studios/this_studio/train/giga-fren.release2.fixed.fr", "/teamspace/studios/this_studio/data/giga-fren.release2.fr-en.fr")
+        os.rename(os.getcwd() + "/train/giga-fren.release2.fixed.en", os.getcwd() + "/data/giga-fren.release2.fr-en.en")
+        os.rename(os.getcwd() + "/train/giga-fren.release2.fixed.fr", os.getcwd() + "/data/giga-fren.release2.fr-en.fr")
     if remove:
         shutil.rmtree(path+"/train/")
     if check:
@@ -33,7 +33,7 @@ def data_process(path = os.getcwd(), remove = False, giga = False, check = True)
                     os.remove(i)
             
 if __name__ == "__main__":
-    data_process()
+    data_process(giga = True, remove = True)
 
 
     
