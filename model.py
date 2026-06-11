@@ -75,7 +75,7 @@ class Attention(nn.Module):
         super().__init__()
         self.config = config
 
-        assert config.embedding_dimension % config.num_attention_heads, "Embeddig dimention must divisible by number of heads"
+        assert config.embedding_dimension % config.num_attention_heads == 0, "Embeddig dimention must divisible by number of heads"
 
         self.head_dim = config.embedding_dimension // config.num_attention_heads
         self.q_proj = nn.Linear(config.embedding_dimension, config.embedding_dimension)
@@ -86,20 +86,54 @@ class Attention(nn.Module):
     def forward(self, src, tgt = None, attention_mask = None, causal = False):
         batch, seq_len, embed = src.shape 
         if tgt is None:
-            q = self.q_proj(src).reshape(batch, seq_len, self.config.num_attention_heads, embed).trasnpose(1,2)
-            k = self.k_proj(src).reshape(batch, seq_len, self.config.num_attention_heads, embed).trasnpose(1,2)
-            v = self.v_proj(src).reshape(batch, seq_len, self.config.num_attention_heads, embed).trasnpose(1,2)
+            q = self.q_proj(src).reshape(batch, seq_len, self.config.num_attention_heads, self.head_dim).transpose(1,2)
+            k = self.k_proj(src).reshape(batch, seq_len, self.config.num_attention_heads, self.head_dim).transpose(1,2)
+            v = self.v_proj(src).reshape(batch, seq_len, self.config.num_attention_heads, self.head_dim).transpose(1,2)
 
             if attention_mask is not None:
                 attention_mask = attention_mask.bool()
-                attetnion_mask = attention_mask.unsqueeze(1).unsqueeze(1).repeat(1, 1, seq_len, 1)
-            attetnion_out = F.scaled_dot_product_attention(q, k, v, attn_mask = attention_mask, dropout_p= self.config.attention_dropout_p if self.training else 0.0)
+                attention_mask = attention_mask.unsqueeze(1).unsqueeze(1).repeat(1, 1, seq_len, 1)
+            attention_out = F.scaled_dot_product_attention(q, k, v, attn_mask = attention_mask, dropout_p= self.config.attention_dropout_p if self.training else 0.0, is_causal = causal)
 
+        else:
+            tgt_len = tgt.shape[-2]
+            q = self.q_proj(tgt).reshape(batch, tgt_len, self.config.num_attention_heads, self.head_dim).transpose(1,2)
+            k = self.k_proj(src).reshape(batch, seq_len, self.config.num_attention_heads, self.head_dim).transpose(1,2)
+            v = self.v_proj(src).reshape(batch, seq_len, self.config.num_attention_heads, self.head_dim).transpose(1,2)
 
+            if attention_mask is not None:
+                attention_mask = attention_mask.bool()
+                attetnion_mask = attention_mask.unsqueeze(1).unsqueeze(1).repeat(1, 1, tgt_len, 1)
+            attention_out = F.scaled_dot_product_attention(q, k, v, attn_mask = attention_mask, dropout_p= self.config.attention_dropout_p if self.training else 0.0, is_causal = False)
+        attention_out = attention_out.transpose(2, 1).flatten(2)
+        attention_out = self.out_proj(attention_out)
+        return attention_out
 
+class FeedForward(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.hidded_size = config.embedding_dimension * config.mlp_ratio
+        self.intermidiate_dense = nn.Linear(config.embedding_dimension, self.hidded_size)
+        self.activation = nn.GELU()
+        self.intermidiate_drop = nn.Dropout(config.hidden_dropout_p)
+        self.output_dense = nn.Linear(self.hidded_size, config.embedding_dimension)
+        self.output_drop = nn.Dropout(config.hidden_dropout_p)
+    
+    def forward(self, x):
+        x = self.intermidiate_dense(x)
+        x = self.activation(x)
+        x = self.intermidiate_drop(x)
+        x = self.output_dense(x)
+        return self.output_drop(x)
 
 if __name__ == "__main__":
     config = TransformerConfig()
+    data = torch.rand((5, 3678, 512))
+    data2 = torch.rand((5, 61, 512))
+    k = Attention(config)
+    f = FeedForward(config)
+    c = f(k(data, data2))
+    print(c)
 
 
 
