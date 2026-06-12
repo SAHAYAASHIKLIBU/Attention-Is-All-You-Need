@@ -3,6 +3,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from dataclasses import dataclass
+from tqdm import tqdm
+
 
 @dataclass
 class TransformerConfig:
@@ -22,11 +24,12 @@ class TransformerConfig:
     learn_pos_embedd: bool = False
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, max_len, embedd_dim, requires_grad=False):
+    def __init__(self, config, requires_grad=False):
         super().__init__()
+        self.config = config
 
-        self.max_len = max_len
-        self.embedd_dim = embedd_dim
+        self.max_len = config.src_sequence_length
+        self.embedd_dim = config.embedding_dimension
         self.requires_grad = requires_grad
 
         self.encodings = self._build_positional_encoding()
@@ -60,8 +63,8 @@ class Embeddings(nn.Module):
         self.src_embeddings = nn.Embedding(config.src_vocab_size, config.embedding_dimension)
         self.tgt_embeddings = nn.Embedding(config.tgt_vocab_size, config.embedding_dimension)
 
-        self.src_positional_encoding = PositionalEncoding(config.src_sequence_length, config.embedding_dimension, config.learn_pos_embedd)
-        self.tgt_positional_encoding = PositionalEncoding(config.tgt_sequence_length, config.embedding_dimension, config.learn_pos_embedd)
+        self.src_positional_encoding = PositionalEncoding(config)
+        self.tgt_positional_encoding = PositionalEncoding(config)
 
     def forward_src(self, input):
         embeddings = self.src_embeddings(input)
@@ -126,14 +129,122 @@ class FeedForward(nn.Module):
         x = self.output_dense(x)
         return self.output_drop(x)
 
+class TransformerEncoder(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.enc_attention = Attention(config)
+        self.feedforward = FeedForward(config)
+        self.dropout = nn.Dropout(config.hidden_dropout_p)
+        self.layernorm = nn.LayerNorm(config.embedding_dimension)
+        self.final_layernorm = nn.LayerNorm(config.embedding_dimension)
+    
+    def forward(self, x, src_mask=None):
+        x = x + self.dropout(self.enc_attention(x))
+        x = self.layernorm(x)
+        x = x + self.feedforward(x)
+        return self.final_layernorm(x)
+
+class TransformerDecoder(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.de_masked_attention = Attention(config)
+        self.de_masked_attetnion_dropout = nn.Dropout(config.hidden_dropout_p)
+        self.de_masked_norm = nn.LayerNorm(config.embedding_dimension)
+
+        self.cross_attention = Attention(config)
+        self.cross_attention_dropout = nn.Dropout(config.hidden_dropout_p)
+        self.cross_attention_layernorm = nn.LayerNorm(config.embedding_dimension)
+        
+        self.de_feedforward = FeedForward(config)
+        self.final_layernorm = nn.LayerNorm(config.embedding_dimension)
+    
+    def forward(self, src, tgt, src_mask = None, tgt_mask = None):
+        x = tgt + self.de_masked_attetnion_dropout(self.de_masked_attention(tgt, causal = True))
+        x = self.de_masked_norm(x)
+
+        x = x + self.cross_attention_dropout(self.cross_attention(src, x, attention_mask = src_mask))
+        x = self.cross_attention_layernorm(x)
+
+        x = x + self.de_feedforward(x)
+        return self.final_layernorm(x)
+
+
+
+class Transformer(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.encodings = Embeddings(config)
+        self.decoder = nn.ModuleList(
+        [TransformerDecoder(config) for _ in range(config.decoder_depth)]
+        )
+        self.encoder = nn.ModuleList(
+        [TransformerEncoder(config) for _ in range(config.encoder_depth)]
+        )
+        self.pred = nn.Linear(config.embedding_dimension, config.tgt_vocab_size)
+
+        self.apply(_init_weights_)
+    def forward(self, src, tgt, src_mask = None, tgt_mask = None):
+        src = self.encodings.forward_src(src)
+        tgt = self.encodings.forward_tgt(tgt)
+        for layer in self.encoder:
+            src = layer(src, src_mask = src_mask)
+        for layer in self.decoder:
+            tgt = layer(src, tgt, src_mask, tgt_mask)
+        x = self.pred(tgt)
+        return x
+
+    @torch.no_grad()
+    def inference(self, src, start_id, end_id, max_len= 512):
+        tgt_ids = torch.tensor([start_id], device = src.device).unsqueeze(0)
+
+        src_embeddings = self.encodings.forward_src(src)
+        for layer in self.encoder:
+            src_embeddings = layer(src_embeddings)
+            
+        for _ in tqdm(range(max_len)):
+            tgt_embeddings = self.encodings.forward_tgt(tgt_ids)
+
+            for layer in self.decoder:
+                tgt_embeddings = layer(src_embeddings, tgt_embeddings)
+
+            tgt_embeddings = tgt_embeddings[:, -1]
+            pred = self.pred(tgt_embeddings)
+            pred = pred.argmax(dim=-1).unsqueeze(0)
+            if pred == end_id:
+                break
+
+            tgt_ids = torch.cat([tgt_ids, pred], dim = -1)
+        return tgt_ids.squeeze(0).cpu().tolist()
+    
+def _init_weights_(module):
+    if isinstance(module, nn.Linear):
+        module.weight.data.normal_(mean=0.0, std=0.02)
+        if module.bias is not None:
+            module.bias.data.zero_()
+    elif isinstance(module, nn.Embedding):
+        module.weight.data.normal_(mean=0.0, std=0.02)
+        if module.padding_idx is not None:
+            module.weight.data[module.padding_idx].zero_()
+    elif isinstance(module, nn.LayerNorm):
+        module.bias.data.zero_()
+        module.weight.data.fill_(1.0)
+
+
+            
+            
+            
+
+
+
+
+
 if __name__ == "__main__":
     config = TransformerConfig()
-    data = torch.rand((5, 3678, 512))
-    data2 = torch.rand((5, 61, 512))
-    k = Attention(config)
-    f = FeedForward(config)
-    c = f(k(data, data2))
-    print(c)
-
+    data = torch.randint(low = 0, high = 10000, size = (5, 88))
+    data2 = torch.randint(low = 0, high = 10000, size = (5, 78))
+    a = Transformer(config)
+    english = torch.randint(low = 0, high = 10000, size = (1, 88))
+    print(a.inference(english, 2, 3))
 
 
